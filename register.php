@@ -2,33 +2,49 @@
 session_start();
 include 'db.php';
 
-$msg = $msgtype = "";
+$msg = $msgtype = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = trim($_POST['username']);
+    $email    = trim($_POST['email']);
     $password = $_POST['password'];
     $role     = in_array($_POST['role'], ['buyer','seller']) ? $_POST['role'] : 'buyer';
 
     if (strlen($username) < 3) {
-        $msg = "Username must be at least 3 characters."; $msgtype = "error";
+        $msg = "Username must be at least 3 characters."; $msgtype = 'error';
+    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $msg = "Please enter a valid email address."; $msgtype = 'error';
     } elseif (!preg_match('/^(?=.*[A-Z]).{8,}$/', $password)) {
-        $msg = "Password needs 8+ characters and at least 1 uppercase letter."; $msgtype = "error";
+        $msg = "Password needs 8+ characters and at least 1 uppercase letter."; $msgtype = 'error';
     } else {
-        $chk = $conn->prepare("SELECT id FROM users WHERE username=?");
-        $chk->bind_param("s", $username);
-        $chk->execute();
-        $chk->store_result();
+        // Check username OR email already taken
+        $chk = $conn->prepare("SELECT id FROM users WHERE username=? OR email=?");
+        $chk->bind_param("ss", $username, $email);
+        $chk->execute(); $chk->store_result();
         if ($chk->num_rows > 0) {
-            $msg = "Username already taken."; $msgtype = "error";
+            $msg = "Username or email already taken."; $msgtype = 'error';
         } else {
             $hash = password_hash($password, PASSWORD_DEFAULT);
-            $ins  = $conn->prepare("INSERT INTO users (username,password,role) VALUES (?,?,?)");
-            $ins->bind_param("sss", $username, $hash, $role);
+            $ins  = $conn->prepare("INSERT INTO users (username, email, password, role) VALUES (?,?,?,?)");
+            $ins->bind_param("ssss", $username, $email, $hash, $role);
             $ins->execute();
             $new_id = $conn->insert_id;
-            log_activity($conn, $new_id, "registered", "Role: $role");
             $ins->close();
-            $msg = "Account created! You can now login."; $msgtype = "success";
+
+            log_activity($conn, $new_id, "registered", "Role: $role");
+
+            // Send welcome email
+            include 'mailer.php';
+            $body = "
+                <p>Hi <strong style='color:#e8f0ff'>$username</strong>,</p>
+                <p>Welcome to ShopBlue! Your account has been created successfully as a <strong style='color:#3d8bff'>$role</strong>.</p>
+                <p>You can now <a href='" . SITE_URL . "/login.php' class='btn'>Login to ShopBlue</a></p>
+                <p>If you didn't create this account, ignore this email.</p>
+            ";
+            send_mail($email, $username, 'Welcome to ShopBlue!', $body);
+
+            $msg = "Account created! Check your email for a welcome message.";
+            $msgtype = 'success';
         }
         $chk->close();
     }
@@ -68,6 +84,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <label>Username</label>
         <input type="text" name="username" placeholder="e.g. juan_dela_cruz" required
                value="<?= htmlspecialchars($_POST['username'] ?? '') ?>">
+      </div>
+
+      <div class="field">
+        <label>Email Address</label>
+        <input type="text" name="email" placeholder="e.g. juan@gmail.com" required
+               value="<?= htmlspecialchars($_POST['email'] ?? '') ?>">
       </div>
 
       <div class="field">

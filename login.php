@@ -2,13 +2,13 @@
 session_start();
 include 'db.php';
 
-$error = "";
+$error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = trim($_POST['username']);
     $password = $_POST['password'];
 
-    $stmt = $conn->prepare("SELECT id,username,password,role FROM users WHERE username=?");
-    $stmt->bind_param("s", $username);
+    $stmt = $conn->prepare("SELECT id, username, email, password, role FROM users WHERE username=? OR email=?");
+    $stmt->bind_param("ss", $username, $username); // allow login with username OR email
     $stmt->execute();
     $res = $stmt->get_result();
 
@@ -20,11 +20,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['role']     = $user['role'];
             log_activity($conn, $user['id'], "login", "Logged in");
             $stmt->close();
-            header("Location: " . ($user['role']==='seller' ? 'seller_dashboard.php' : 'shop.php'));
+            header("Location: " . ($user['role'] === 'seller' ? 'seller_dashboard.php' : 'shop.php'));
             exit();
         }
     }
-    $error = "Invalid username or password.";
+    $error = "Invalid username/email or password.";
     $stmt->close();
 }
 ?>
@@ -40,11 +40,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <?php if ($error): ?>
       <div class="msg msg-error"><?= htmlspecialchars($error) ?></div>
     <?php endif; ?>
+    <?php if (isset($_GET['reset'])): ?>
+      <div class="msg msg-success">✓ Password reset! You can now login.</div>
+    <?php endif; ?>
 
     <form method="POST">
       <div class="field">
-        <label>Username</label>
-        <input type="text" name="username" placeholder="Your username" required autofocus>
+        <label>Username or Email</label>
+        <input type="text" name="username" placeholder="Username or email" required autofocus>
       </div>
       <div class="field">
         <label>Password</label>
@@ -56,10 +59,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <button type="submit" class="btn btn-full" style="margin-top:4px">Sign In</button>
     </form>
 
-    <p style="text-align:center;margin-top:16px;font-size:.85rem;color:var(--muted)">
+    <div style="text-align:center;margin-top:14px">
+      <a href="forgot_password.php" class="lnk" style="font-size:.85rem">Forgot password?</a>
+    </div>
+    <p style="text-align:center;margin-top:10px;font-size:.85rem;color:var(--muted)">
       No account yet? <a href="register.php" class="lnk">Register</a>
     </p>
   </div>
 </div>
-<script>function togglePw(id,el){const i=document.getElementById(id);i.type=i.type==='password'?'text':'password';}</script>
+<script>function togglePw(id){const i=document.getElementById(id);i.type=i.type==='password'?'text':'password';}</script>
 </body></html>
