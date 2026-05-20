@@ -70,7 +70,31 @@ $back = $current_role === 'seller' ? 'seller_orders.php' : 'my_orders.php';
         <div class="help" style="margin-bottom:3px">ADDRESS</div>
         <div style="font-size:.9rem"><?= nl2br(htmlspecialchars($order['address'])) ?></div>
       </div>
+      <div>
+        <div class="help" style="margin-bottom:3px">PAYMENT METHOD</div>
+        <div style="font-size:.9rem"><?= $order['payment_method'] === 'gcash' ? '📱 GCash / Online' : '� Wallet' ?></div>
+      </div>
+      <div>
+        <div class="help" style="margin-bottom:3px">PAYMENT STATUS</div>
+        <?php
+          $ps = $order['payment_status'] ?? 'unpaid';
+          $ps_color = $ps === 'paid' ? 'var(--success)' : ($ps === 'refunded' ? '#ff9f43' : 'var(--danger)');
+          $ps_icon  = $ps === 'paid' ? '✅' : ($ps === 'refunded' ? '↩️' : '⏳');
+        ?>
+        <div style="font-size:.9rem;color:<?= $ps_color ?>"><?= $ps_icon ?> <?= ucfirst($ps) ?></div>
+      </div>
     </div>
+
+    <!-- Payment proof -->
+    <?php if (!empty($order['payment_proof']) && file_exists('uploads/payments/' . $order['payment_proof'])): ?>
+    <div class="divider"></div>
+    <div style="margin-bottom:16px">
+      <div class="help" style="margin-bottom:8px">PAYMENT PROOF</div>
+      <img src="uploads/payments/<?= htmlspecialchars($order['payment_proof']) ?>"
+           alt="Payment proof"
+           style="max-width:320px;width:100%;border-radius:var(--r-md);border:1px solid var(--blue-border)">
+    </div>
+    <?php endif; ?>
 
     <!-- Cancellation info block -->
     <?php if ($order['cancel_status'] !== 'none'): ?>

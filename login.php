@@ -20,7 +20,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['role']     = $user['role'];
             log_activity($conn, $user['id'], "login", "Logged in");
             $stmt->close();
-            header("Location: " . ($user['role'] === 'seller' ? 'seller_dashboard.php' : 'shop.php'));
+            if ($user['role'] === 'seller') {
+                header("Location: seller_dashboard.php");
+            } elseif ($user['role'] === 'admin') {
+                header("Location: admin_requests.php");
+            } else {
+                header("Location: shop.php");
+            }
             exit();
         }
     }

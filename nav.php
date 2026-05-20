@@ -9,12 +9,18 @@ $page = basename($_SERVER['PHP_SELF']);
   <div class="nav-links">
     <?php if ($current_role === 'buyer'): ?>
       <a href="shop.php"         <?= $page==='shop.php'         ? 'class="active"' : '' ?>>Shop</a>
+      <a href="wallet.php"       <?= $page==='wallet.php'       ? 'class="active"' : '' ?>>Wallet</a>
       <a href="my_orders.php"    <?= $page==='my_orders.php'    ? 'class="active"' : '' ?>>My Orders</a>
       <a href="activity_log.php" <?= $page==='activity_log.php' ? 'class="active"' : '' ?>>My Activity</a>
+    <?php elseif ($current_role === 'seller'): ?>
+      <a href="seller_dashboard.php"    <?= $page==='seller_dashboard.php'    ? 'class="active"' : '' ?>>Dashboard</a>
+      <a href="my_products.php"        <?= $page==='my_products.php'        ? 'class="active"' : '' ?>>My Products</a>
+      <a href="seller_orders.php"     <?= $page==='seller_orders.php'     ? 'class="active"' : '' ?>>Orders</a>
+      <a href="withdrawal_request.php"<?= $page==='withdrawal_request.php' ? 'class="active"' : '' ?>>Withdraw</a>
+      <a href="activity_log.php"      <?= $page==='activity_log.php'      ? 'class="active"' : '' ?>>Logs</a>
     <?php else: ?>
-      <a href="seller_dashboard.php" <?= $page==='seller_dashboard.php' ? 'class="active"' : '' ?>>Dashboard</a>
-      <a href="my_products.php"      <?= $page==='my_products.php'      ? 'class="active"' : '' ?>>My Products</a>
-      <a href="seller_orders.php"    <?= $page==='seller_orders.php'    ? 'class="active"' : '' ?>>Orders</a>
+      <a href="admin_dashboard.php"    <?= $page==='admin_dashboard.php'    ? 'class="active"' : '' ?>>Dashboard</a>
+      <a href="admin_requests.php"      <?= $page==='admin_requests.php'      ? 'class="active"' : '' ?>>Requests</a>
       <a href="activity_log.php"     <?= $page==='activity_log.php'     ? 'class="active"' : '' ?>>Logs</a>
     <?php endif; ?>
   </div>

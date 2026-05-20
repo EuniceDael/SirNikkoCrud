@@ -13,7 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if (!$reason) {
             $cancel_error = "Please provide a reason for cancellation.";
         } else {
-            $chk = $conn->prepare("SELECT id, status FROM orders WHERE id=? AND buyer_id=?");
+            $chk = $conn->prepare("SELECT id, status, payment_method FROM orders WHERE id=? AND buyer_id=?");
             $chk->bind_param("ii", $oid, $current_user_id);
             $chk->execute();
             $chk_order = $chk->get_result()->fetch_assoc();
@@ -149,6 +149,17 @@ while ($r = $rev_rows->fetch_assoc()) {
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span class="badge badge-<?= $o['status'] ?>"><?= $o['status'] ?></span>
+          <?php
+            $pm = $o['payment_method'] ?? 'wallet';
+            $ps = $o['payment_status'] ?? 'unpaid';
+          ?>
+          <?php if ($ps === 'paid'): ?>
+            <span class="badge badge-delivered">✅ Paid</span>
+          <?php elseif ($ps === 'refunded'): ?>
+            <span class="badge" style="background:rgba(255,159,67,.1);color:#ff9f43;border:1px solid rgba(255,159,67,.3)">↩️ Refunded</span>
+          <?php else: ?>
+            <span class="badge badge-pending">⏳ <?= $pm === 'gcash' ? 'GCash Pending' : 'Pending' ?></span>
+          <?php endif; ?>
           <?php if ($o['cancel_status'] === 'pending'): ?>
             <span class="badge badge-pending">⏳ Cancel Pending</span>
           <?php elseif ($o['cancel_status'] === 'approved'): ?>

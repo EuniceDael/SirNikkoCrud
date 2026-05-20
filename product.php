@@ -4,18 +4,19 @@ include 'db.php';
 if ($current_role !== 'buyer') { header("Location: seller_dashboard.php"); exit(); }
 
 $id   = intval($_GET['id'] ?? 0);
-$stmt = $conn->prepare("SELECT p.*, u.username AS seller FROM products p JOIN users u ON p.seller_id=u.id WHERE p.id=?");
+$stmt = $conn->prepare("SELECT p.*, u.username AS seller, u.qr_code AS seller_qr_code FROM products p JOIN users u ON p.seller_id=u.id WHERE p.id=?");
 $stmt->bind_param("i", $id);
 $stmt->execute();
 $p = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 if (!$p) { header("Location: shop.php"); exit(); }
 
-$me = $conn->prepare("SELECT phone, address FROM users WHERE id=?");
+$me = $conn->prepare("SELECT phone, address, wallet_balance FROM users WHERE id=?");
 $me->bind_param("i", $current_user_id);
 $me->execute();
 $my = $me->get_result()->fetch_assoc();
 $me->close();
+$current_wallet_balance = floatval($my['wallet_balance'] ?? 0);
 
 $revs = $conn->prepare("SELECT r.*, u.username FROM reviews r JOIN users u ON r.buyer_id=u.id WHERE r.product_id=? ORDER BY r.created_at DESC");
 $revs->bind_param("i", $id);
@@ -46,31 +47,51 @@ $img_path = ($p['image'] && file_exists('uploads/products/' . $p['image']))
 $msg = $msgtype = '';
 
 // ── ORDER ────────────────────────────────────────────────────
+// COD removed: all orders use wallet (or other online methods)
 if (isset($_POST['action']) && $_POST['action'] === 'order') {
-    $qty     = max(1, intval($_POST['quantity']));
-    $phone   = trim($_POST['phone']);
-    $address = trim($_POST['address']);
+  $qty            = max(1, intval($_POST['quantity']));
+  $phone          = trim($_POST['phone']);
+  $address        = trim($_POST['address']);
+  // Force wallet payment flow to simplify handling
+  $payment_method = 'wallet';
+
     if ($qty > $p['stock']) {
         $msg = "Not enough stock. Only {$p['stock']} left."; $msgtype = 'error';
     } elseif (!$phone || !$address) {
         $msg = "Phone and address are required."; $msgtype = 'error';
+    } elseif ($payment_method === 'wallet' && $current_wallet_balance < ($p['price'] * $qty)) {
+        $msg = "Insufficient wallet balance. Please deposit more funds first."; $msgtype = 'error';
     } else {
-        $total = $p['price'] * $qty;
-        $ord = $conn->prepare("INSERT INTO orders (buyer_id,phone,address,total_amount) VALUES (?,?,?,?)");
-        $ord->bind_param("issd", $current_user_id, $phone, $address, $total);
-        $ord->execute(); $order_id = $conn->insert_id; $ord->close();
-        $oi = $conn->prepare("INSERT INTO order_items (order_id,product_id,seller_id,quantity,price) VALUES (?,?,?,?,?)");
-        $oi->bind_param("iiiid", $order_id, $p['id'], $p['seller_id'], $qty, $p['price']);
-        $oi->execute(); $oi->close();
-        $st = $conn->prepare("UPDATE products SET stock = stock - ? WHERE id=?");
-        $st->bind_param("ii", $qty, $p['id']); $st->execute(); $st->close();
-        $upd = $conn->prepare("UPDATE users SET phone=?, address=? WHERE id=?");
-        $upd->bind_param("ssi", $phone, $address, $current_user_id); $upd->execute(); $upd->close();
-        log_activity($conn, $current_user_id, "placed_order", "Order #$order_id — {$p['name']} x$qty");
-        header("Location: my_orders.php?success=1"); exit();
-    }
-}
+        $total      = $p['price'] * $qty;
+      $pay_status = 'paid';
 
+        if ($payment_method === 'wallet') {
+            $wallet_upd = $conn->prepare("UPDATE users SET wallet_balance = wallet_balance - ? WHERE id=?");
+            $wallet_upd->bind_param("di", $total, $current_user_id);
+            $wallet_upd->execute();
+            $wallet_upd->close();
+        }
+
+        $ord = $conn->prepare("INSERT INTO orders (buyer_id,phone,address,total_amount,payment_method,payment_status,payment_proof) VALUES (?,?,?,?,?,?,?)");
+        $payment_proof = null;
+        $ord->bind_param("issdsss", $current_user_id, $phone, $address, $total, $payment_method, $pay_status, $payment_proof);
+        $ord->execute(); $order_id = $conn->insert_id; $ord->close();
+
+            $oi = $conn->prepare("INSERT INTO order_items (order_id,product_id,seller_id,quantity,price) VALUES (?,?,?,?,?)");
+            $oi->bind_param("iiiid", $order_id, $p['id'], $p['seller_id'], $qty, $p['price']);
+            $oi->execute(); $oi->close();
+
+            $st = $conn->prepare("UPDATE products SET stock = stock - ? WHERE id=?");
+            $st->bind_param("ii", $qty, $p['id']); $st->execute(); $st->close();
+
+            $upd = $conn->prepare("UPDATE users SET phone=?, address=? WHERE id=?");
+            $upd->bind_param("ssi", $phone, $address, $current_user_id); $upd->execute(); $upd->close();
+
+            log_activity($conn, $current_user_id, "placed_order", "Order #$order_id — {$p['name']} x$qty via $payment_method");
+            header("Location: my_orders.php?success=1"); exit();
+        }
+    }
+  
 // ── REVIEW ───────────────────────────────────────────────────
 if (isset($_POST['action']) && $_POST['action'] === 'review') {
     if (!$has_delivered_order) {
@@ -123,10 +144,10 @@ if (isset($_POST['action']) && $_POST['action'] === 'review') {
     <?php if ($p['stock'] > 0): ?>
     <div class="divider"></div>
     <h3 style="margin-bottom:14px">Place Order</h3>
-    <form method="POST">
+    <form method="POST" enctype="multipart/form-data">
       <input type="hidden" name="action" value="order">
       <div class="field"><label>Quantity</label>
-        <input type="number" name="quantity" value="1" min="1" max="<?= $p['stock'] ?>">
+        <input type="number" name="quantity" id="qty-input" value="1" min="1" max="<?= $p['stock'] ?>">
       </div>
       <div class="field"><label>Phone Number</label>
         <input type="tel" name="phone" placeholder="e.g. 09123456789" required
@@ -135,7 +156,29 @@ if (isset($_POST['action']) && $_POST['action'] === 'review') {
       <div class="field"><label>Delivery Address</label>
         <textarea name="address" placeholder="Your full delivery address" required><?= htmlspecialchars($_POST['address'] ?? $my['address'] ?? '') ?></textarea>
       </div>
-      <button type="submit" class="btn" style="margin-top:4px">🛒 Place Order</button>
+
+      <!-- Payment Method -->
+      <input type="hidden" name="payment_method" value="wallet">
+      <div class="field">
+        <label>Payment Method</label>
+        <div style="margin-top:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:1.4rem">🟢</span>
+            <div>
+              <div style="font-weight:600">Pay With Wallet</div>
+              <div style="font-size:.85rem;color:var(--muted)">Wallet funds will be used immediately.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="field" style="background:rgba(26,108,255,.04);border:1px solid var(--blue-border);border-radius:var(--r-sm);padding:14px;margin-top:8px">
+        <div style="font-size:.88rem;color:var(--muted)">Your Shop Wallet Balance</div>
+        <div style="font-size:1.5rem;font-weight:700;color:var(--blue-hi)">&#8369;<?= number_format($current_wallet_balance, 2) ?></div>
+        <div style="margin-top:8px;font-size:.82rem;color:var(--muted)">Deposit funds in <a href="wallet.php" class="lnk">Wallet</a> before paying with wallet.</div>
+      </div>
+
+      <button type="submit" class="btn" style="margin-top:8px">🛒 Place Order</button>
     </form>
     <?php else: ?>
       <div class="msg msg-error">Out of stock.</div>
@@ -183,4 +226,25 @@ if (isset($_POST['action']) && $_POST['action'] === 'review') {
     <?php endif; ?>
   </div>
 </div>
+<script>
+// Wallet payment and order value display
+const unitPrice = <?= json_encode(floatval($p['price'])) ?>;
+const qtyInput = document.getElementById('qty-input');
+
+function updatePrice() {
+  const qty = parseInt(qtyInput.value) || 1;
+  const total = qty * unitPrice;
+  const priceDisplay = document.getElementById('price-display');
+  if (priceDisplay) {
+    priceDisplay.textContent = total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+}
+
+if (qtyInput) {
+  qtyInput.addEventListener('input', updatePrice);
+  qtyInput.addEventListener('change', updatePrice);
+}
+
+// No payment-method toggles required; COD removed
+</script>
 </body></html>

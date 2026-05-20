@@ -32,24 +32,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         if ($chk->num_rows > 0) {
             $msg_profile = "Username or email is already taken by another account."; $msgtype_profile = 'error';
         } else {
-            $upd = $conn->prepare("UPDATE users SET username=?, email=?, phone=?, address=? WHERE id=?");
-            $upd->bind_param("ssssi", $new_username, $new_email, $new_phone, $new_address, $current_user_id);
-            $upd->execute(); $upd->close();
+            $qr_filename = $user['qr_code']; // Keep existing by default
+            if ($current_role === 'seller' && !empty($_FILES['qr_code']['name'])) {
+                $allowed = ['image/jpeg','image/png','image/gif','image/webp'];
+                $max_size = 2 * 1024 * 1024; // 2MB
 
-            // Update session username
-            $_SESSION['username'] = $new_username;
-            $current_username     = $new_username;
+                if (!in_array($_FILES['qr_code']['type'], $allowed)) {
+                    $msg_profile = "Only JPG, PNG, GIF, or WEBP images are allowed for the QR Code.";
+                    $msgtype_profile = 'error';
+                } elseif ($_FILES['qr_code']['size'] > $max_size) {
+                    $msg_profile = "QR Code image must be under 2MB.";
+                    $msgtype_profile = 'error';
+                } else {
+                    $upload_dir = 'uploads/qrcodes/';
+                    if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
+                    $ext = pathinfo($_FILES['qr_code']['name'], PATHINFO_EXTENSION);
+                    $new_filename = 'qr_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . strtolower($ext);
+                    if (move_uploaded_file($_FILES['qr_code']['tmp_name'], $upload_dir . $new_filename)) {
+                        // Delete old QR code file if it exists
+                        if ($user['qr_code'] && file_exists($upload_dir . $user['qr_code'])) {
+                            @unlink($upload_dir . $user['qr_code']);
+                        }
+                        $qr_filename = $new_filename;
+                    } else {
+                        $msg_profile = "Failed to upload QR code. Check folder permissions.";
+                        $msgtype_profile = 'error';
+                    }
+                }
+            }
 
-            log_activity($conn, $current_user_id, "updated_profile", "Profile info updated");
+            if (!$msg_profile || $msgtype_profile !== 'error') {
+                $bank_name = trim($_POST['bank_name'] ?? '');
+                $account_name = trim($_POST['account_name'] ?? '');
+                $account_number = trim($_POST['account_number'] ?? '');
+                $upd = $conn->prepare("UPDATE users SET username=?, email=?, phone=?, address=?, qr_code=?, bank_name=?, account_name=?, account_number=? WHERE id=?");
+                $upd->bind_param("ssssssssi", $new_username, $new_email, $new_phone, $new_address, $qr_filename, $bank_name, $account_name, $account_number, $current_user_id);
+                $upd->execute(); $upd->close();
 
-            // Refresh user data
-            $stmt2 = $conn->prepare("SELECT * FROM users WHERE id=?");
-            $stmt2->bind_param("i", $current_user_id);
-            $stmt2->execute();
-            $user = $stmt2->get_result()->fetch_assoc();
-            $stmt2->close();
+                // Update session username
+                $_SESSION['username'] = $new_username;
+                $current_username     = $new_username;
 
-            $msg_profile = "✓ Profile updated successfully!"; $msgtype_profile = 'success';
+                log_activity($conn, $current_user_id, "updated_profile", "Profile info updated");
+
+                // Refresh user data
+                $stmt2 = $conn->prepare("SELECT * FROM users WHERE id=?");
+                $stmt2->bind_param("i", $current_user_id);
+                $stmt2->execute();
+                $user = $stmt2->get_result()->fetch_assoc();
+                $stmt2->close();
+
+                $msg_profile = "✓ Profile updated successfully!"; $msgtype_profile = 'success';
+            }
         }
         $chk->close();
     }
@@ -134,7 +168,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             <div class="msg msg-<?= $msgtype_profile ?>"><?= htmlspecialchars($msg_profile) ?></div>
           <?php endif; ?>
 
-          <form method="POST" style="gap:14px">
+          <form method="POST" enctype="multipart/form-data" style="gap:14px">
             <input type="hidden" name="action" value="update_profile">
 
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
@@ -155,6 +189,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
               <input type="tel" name="phone" placeholder="e.g. 09123456789"
                      value="<?= htmlspecialchars($user['phone'] ?? '') ?>">
             </div>
+
+            <?php if ($current_role === 'seller'): 
+              $qr_path = ($user['qr_code'] && file_exists('uploads/qrcodes/' . $user['qr_code']))
+                         ? 'uploads/qrcodes/' . htmlspecialchars($user['qr_code'])
+                         : null;
+            ?>
+              <div class="field">
+                <label>Payment QR Code <span style="color:var(--dim)">(optional, max 2MB)</span></label>
+                <div style="display:flex;gap:16px;align-items:center;margin-top:4px;flex-wrap:wrap">
+                  <div id="qr-preview-box" style="width:100px;height:100px;border:1px dashed var(--blue-border);border-radius:var(--r-sm);background:rgba(26,108,255,.06);display:flex;align-items:center;justify-content:center;overflow:hidden">
+                    <?php if ($qr_path): ?>
+                      <img src="<?= $qr_path ?>" alt="QR Code" style="width:100%;height:100%;object-fit:cover">
+                    <?php else: ?>
+                      <span style="font-size:1.5rem;color:var(--dim)">🖼</span>
+                    <?php endif; ?>
+                  </div>
+                  <div style="flex:1;min-width:180px">
+                    <input type="file" name="qr_code" accept="image/*" id="qr-input" onchange="previewQr(this)" style="background:rgba(6,14,35,.88);border:1px solid var(--blue-border);border-radius:var(--r-sm);color:var(--text);padding:8px 12px;font-size:.85rem;width:100%">
+                    <span class="help">JPG, PNG, WEBP — Scan to pay QR Code for GCash / Online Payments</span>
+                  </div>
+                </div>
+              </div>
+              <div class="field">
+                <label>Bank Name <span style="color:var(--dim)">(for withdrawals)</span></label>
+                <input type="text" name="bank_name" value="<?= htmlspecialchars($user['bank_name'] ?? '') ?>">
+              </div>
+              <div class="field">
+                <label>Account Name</label>
+                <input type="text" name="account_name" value="<?= htmlspecialchars($user['account_name'] ?? '') ?>">
+              </div>
+              <div class="field">
+                <label>Account Number</label>
+                <input type="text" name="account_number" value="<?= htmlspecialchars($user['account_number'] ?? '') ?>">
+              </div>
+            <?php endif; ?>
 
             <div class="field">
               <label>
@@ -260,5 +329,16 @@ function checkMatch() {
   h.style.color = p === c ? '#00e5a0' : '#ff3b5c';
 }
 document.getElementById('pw-confirm').addEventListener('input', checkMatch);
+
+function previewQr(input) {
+  const box = document.getElementById('qr-preview-box');
+  if (input.files && input.files[0]) {
+    const reader = new FileReader();
+    reader.onload = e => {
+      box.innerHTML = `<img src="${e.target.result}" alt="QR Preview" style="width:100%;height:100%;object-fit:cover">`;
+    };
+    reader.readAsDataURL(input.files[0]);
+  }
+}
 </script>
 </body></html>
